@@ -45,7 +45,7 @@ export default function ResultsTable() {
   const loadResults = async () => {
     setLoading(true);
     try {
-      const params: any = { page: currentPage, limit: 50 };
+      const params: any = { page: currentPage, limit: 10 };
       if (search) params.search = search;
       if (filters.business_name) params.business_name = filters.business_name;
       if (filters.business_status) params.business_status = filters.business_status;
@@ -134,13 +134,13 @@ export default function ResultsTable() {
       accessorKey: 'business_status',
       header: 'Status',
       size: 120,
-      cell: ({ row }) => row.original.business_status || 'N/A',
+      cell: ({ row }) => truncateText(row.original.business_status, 20) || 'N/A',
     },
     {
       accessorKey: 'date_formed',
       header: 'Date Formed',
       size: 130,
-      cell: ({ row }) => row.original.date_formed || 'N/A',
+      cell: ({ row }) => truncateText(row.original.date_formed, 20) || 'N/A',
     },
     {
       accessorKey: 'keyword',
@@ -155,8 +155,8 @@ export default function ResultsTable() {
     {
       accessorKey: 'naics_code',
       header: 'NAICS',
-      size: 100,
-      cell: ({ row }) => row.original.naics_code || 'N/A',
+      size: 200,
+      cell: ({ row }) => truncateText(row.original.naics_code, 20) || 'N/A',
     },
     {
       accessorKey: 'business_email',
@@ -291,14 +291,6 @@ export default function ResultsTable() {
                   onMouseLeave={() => setHoveredRow(null)}
                   onClick={() => setSelectedBusiness(row.original)}
                 >
-                  {hoveredRow === row.original.id && (
-                    <td
-                      colSpan={columns.length}
-                      className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center text-white font-medium z-10"
-                    >
-                      To show in detailed mode, Click
-                    </td>
-                  )}
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
@@ -308,6 +300,14 @@ export default function ResultsTable() {
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
+                  {hoveredRow === row.original.id && (
+                    <td
+                      colSpan={columns.length}
+                      className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center text-white font-medium z-10"
+                    >
+                      To show in detailed mode, Click
+                    </td>
+                  )}
                 </tr>
               ))
             )}

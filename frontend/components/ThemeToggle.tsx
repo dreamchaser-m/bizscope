@@ -12,13 +12,15 @@ export default function ThemeToggle() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
+  if (!theme) return null;
+
   return (
     <Button
       onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
       size="icon"
       variant="outline"
     >
-      {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+      {theme ? (theme === 'light' ? (<Moon className="h-5 w-5" />) : (<Sun className="h-5 w-5" />)) : (<Moon className="h-5 w-5" />)}
     </Button>
   );
 }
