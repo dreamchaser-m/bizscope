@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import { Separator } from './ui/separator';
-import type { BusinessResult } from '../lib/store';
+import type { BusinessResult } from '@/lib/store';
 
 interface BusinessModalProps {
   business: BusinessResult | null;
