@@ -1,0 +1,262 @@
+Project name
+------------
+BizScope — “Discover, Track, and Analyze Connecticut Businesses”
+
+Overview
+--------
+BizScope is a modern, full-stack web platform that lets users discover, track, and analyze Connecticut businesses through the Connecticut Open Data APIs.
+
+The platform allows users to manage a list of saved keywords, fetch business data based on those keywords, and view searchable, filterable results in a table. Data is stored in SQLite and automatically refreshed every 7 days.
+
+Languages
+---------
+- Interaction with Replit Agent: English
+- Application interface: English
+
+Tech Stack
+-----------
+- **Frontend:** Next.js (React 18), shadcn/ui, TailwindCSS, Redux Toolkit (or Zustand)
+- **Backend:** FastAPI (Python 3.11+)
+- **Database:** SQLite (via SQLAlchemy ORM)
+- **HTTP client:** httpx (async)
+- **Scheduler:** APScheduler (runs every 7 days)
+- **Hosting:** Replit (provide `.replit` and `replit.nix`)
+- **Theme:** Modern light/dark toggle, saved to localStorage/cookies
+
+Core Functionalities
+--------------------
+1. **Backend Status**
+   - Two possible values: `'idle'` or `'busy'`
+   - When data updates start → set to `'busy'`
+   - When done → set back to `'idle'`
+   - Endpoint: `GET /api/status`
+     ```json
+     {
+       "status": "idle",
+       "last_update": "2025-10-20T12:00:00Z",
+       "progress": { "keywords_done": 2, "total_keywords": 10 }
+     }
+     ```
+
+2. **Saved Keywords**
+   - Table `saved_keywords (id, keyword, created_at, updated_at)`
+   - Full CRUD via endpoints:
+     ```
+     GET    /api/keywords
+     POST   /api/keywords
+     PUT    /api/keywords/{id}
+     DELETE /api/keywords/{id}
+     ```
+   - Editable list panel in frontend (Add / Edit / Delete)
+   - “Save” button commits changes to backend
+   - Disabled when backend status = `'busy'`
+
+3. **Search Results**
+   - Table `business_results` with the following fields:
+     ```
+     id, business_id, keyword, business_name, business_alei, business_status,
+     date_formed, business_email, citizenship_formation, business_address,
+     mailing_address, requires_annual_filing, annual_report_due, public_substatus,
+     naics_code, naics_sub_code, last_report_filed,
+     principal_name, principal_business_address, principal_title,
+     principal_residence_address, agent_name, agent_business_address,
+     agent_mailing_address, agent_residence_address,
+     created_at, updated_at
+     ```
+   - Endpoints:
+     ```
+     GET    /api/results                (filter, paginate, unified search)
+     GET    /api/results/{id}           (detail)
+     POST   /api/results/update         (update all keywords)
+     POST   /api/results/update?keyword={keyword}  (update single keyword)
+     GET    /api/results/status         (returns update progress)
+     ```
+   - Unified search + per-column filters handled by backend query params
+   - Pagination controlled by backend
+
+4. **Data Fetch Logic (exact URL formats preserved)**
+   - The backend uses the following async function to fetch and save results:
+
+     ```python
+     async def fetch_and_save_business_data(db: Session, keyword: str):
+         try:
+             cleaned_keyword = clean_keyword(keyword)
+             business_url = f"https://data.ct.gov/resource/n7gp-d28j.json?$where=(lower(replace(replace(replace(replace(replace(name, ' ', ''), '%26', ''), '-', ''), '.', ''), ',', '')) like '%{cleaned_keyword}%')&$order=name asc"
+             
+             async with httpx.AsyncClient(timeout=30.0) as client:
+                 logger.info(f"Fetching businesses for keyword: {keyword}")
+                 response = await client.get(business_url)
+                 response.raise_for_status()
+                 businesses = response.json()
+
+                 logger.info(f"Found {len(businesses)} businesses for keyword: {keyword}")
+                 
+                 for business in businesses:
+                     business_id = business.get('id')
+                     if not business_id:
+                         continue
+                     
+                     existing = db.query(BusinessResult).filter(
+                         BusinessResult.business_id == business_id
+                     ).first()
+                     
+                     if existing:
+                         if keyword not in existing.keyword.split(', '):
+                             existing.keyword = existing.keyword + ', ' + keyword
+                             db.commit()
+                         continue
+                     
+                     business_alei = business.get('accountnumber')
+
+                     citizenship = business.get('citizenship', '')
+                     formation = business.get('formation_place', '')
+                     citizenship_formation = f"{citizenship}/{formation}" if citizenship or formation else None
+
+                     business_address = build_address(
+                         business.get('billingstreet'),
+                         business.get('billingcity'),
+                         business.get('billingstate'),
+                         business.get('billingpostalcode'),
+                         business.get('billingcountry')
+                     )
+
+                     requires_annual = "Yes" if business.get('annual_report_due_date') else "No"
+                     annual_due = "None" if requires_annual == "No" else business.get('annual_report_due_date')[:10]
+
+                     business_result = BusinessResult(
+                         keyword=keyword,
+                         business_name=business.get('name'),
+                         business_alei=business_alei,
+                         business_id=business_id,
+                         business_status=business.get('status'),
+                         date_formed="None" if business.get('date_registration')[:10] == "0001-01-01" else business.get('date_registration')[:10],
+                         business_email=business.get('business_email_address'),
+                         citizenship_formation=citizenship_formation,
+                         business_address=business_address,
+                         mailing_address=business.get('mailing_address'),
+                         requires_annual_filing=requires_annual,
+                         annual_report_due=annual_due,
+                         public_substatus=business.get('sub_status'),
+                         naics_code=business.get('naics_code'),
+                         naics_sub_code=business.get('naics_sub_code'),
+                         last_report_filed=None
+                     )
+
+                     db.add(business_result)
+                 
+                 db.commit()
+                 logger.info(f"Successfully saved business data for keyword: {keyword}")
+
+             # Fetch principals, agents, and filings
+             businesses = db.query(BusinessResult).all()
+             for business in businesses:
+                 business_id = business.business_id
+                 async with httpx.AsyncClient(timeout=10.0) as client:
+                     try:
+                         principal_url = f"https://data.ct.gov/resource/ka36-64k6.json?$where=(business_id='{business_id}')"
+                         principal_response = await client.get(principal_url)
+                         principal_response.raise_for_status()
+                         principals = principal_response.json()
+                         
+                         if principals:
+                             principal = principals[0]
+                             business.principal_name = principal.get('name__c')
+                             business.principal_title = principal.get('designation')
+                             business.principal_residence_address = principal.get('residence_address')
+                             business.principal_business_address = build_address(
+                                 principal.get('business_street_address_1'),
+                                 principal.get('business_city'),
+                                 principal.get('business_state'),
+                                 principal.get('business_zip_code'),
+                                 principal.get('business_country')
+                             )
+                     except Exception as e:
+                         logger.warning(f"Error fetching principal for business {business_id}: {str(e)}")
+
+                     try:
+                         agent_url = f"https://data.ct.gov/resource/qh2m-n44y.json?$where=(business_key='{business_id}')"
+                         agent_response = await client.get(agent_url)
+                         agent_response.raise_for_status()
+                         agents = agent_response.json()
+                         
+                         if agents:
+                             agent = agents[0]
+                             business.agent_name = agent.get('name__c')
+                             business.agent_business_address = agent.get('business_address')
+                             business.agent_mailing_address = agent.get('mailing_address')
+                             business.agent_residence_address = build_address(
+                                 agent.get('residence_street_address_1'),
+                                 agent.get('residence_city'),
+                                 agent.get('residence_state'),
+                                 agent.get('residence_zip_code'),
+                                 agent.get('residence_country')
+                             )
+                     except Exception as e:
+                         logger.warning(f"Error fetching agent for business {business_id}: {str(e)}")
+
+                     try:
+                         filing_url = f"https://data.ct.gov/resource/ah3s-bes7.json?$where=(account='{business_id}')&$order=filing_date desc&$limit=1"
+                         filing_response = await client.get(filing_url)
+                         filing_response.raise_for_status()
+                         filings = filing_response.json()
+                         
+                         if filings:
+                             business.last_report_filed = filings[0].get('filing_date')[:10]
+                     except Exception as e:
+                         logger.warning(f"Error fetching filing history for business {business_id}: {str(e)}")
+
+                 db.commit()
+         except Exception as e:
+             logger.error(f"Error fetching business data for keyword {keyword}: {str(e)}")
+             db.rollback()
+             raise
+     ```
+
+5. **Frontend Interface**
+   - Two panels:
+     - **Left:** Editable saved keywords list (Add/Edit/Delete)
+     - **Right:** Results table with:
+       - Display/hide toggle
+       - Filter per column
+       - Unified search bar
+       - Pagination
+       - Column resizing
+       - Ellipsis for long text + hover tooltip
+       - On hover → blur with `"To show in detailed mode, Click"` overlay
+       - On click → modal with 3 sections:
+         1. General Information
+         2. Principal Details
+         3. Agent Details
+   - Buttons:
+     - **Save** → Disabled if backend is `'busy'`
+     - **Update** → Disabled if backend is `'busy'`
+     - **Refresh** → Always enabled (re-fetch backend status + table data)
+   - Theme toggle (Light/Dark) → saved in localStorage
+
+6. **Auto Update**
+   - Every 7 days backend runs automatic data refresh for all saved keywords.
+   - Uses APScheduler or background asyncio loop.
+
+Replit Setup
+------------
+- Include `.replit` and `replit.nix`
+- Add README.md with instructions:
+  - How to run (`run` command starts both backend and frontend)
+  - API endpoints
+  - Scheduler behavior
+  - How to add/edit keywords
+  - How to trigger manual update
+- Optional test file to verify endpoints.
+
+Acceptance Criteria
+-------------------
+✅ Backend correctly fetches, saves, and updates data with provided URLs  
+✅ Status system works (`busy`/`idle`)  
+✅ Editable keyword list with Save button  
+✅ Update triggers long-running background fetch job  
+✅ Refresh works at any time  
+✅ Table supports filtering, unified search, pagination, column resizing  
+✅ Modal shows all detailed fields correctly  
+✅ Dark/light theme persisted in localStorage  
+
+End of prompt.
