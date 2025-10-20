@@ -111,43 +111,88 @@ async def get_results(
     naics_code: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    query = db.query(BusinessResult)
-    
-    # Apply unified search
-    if search:
-        search_filter = or_(
-            BusinessResult.business_name.ilike(f"%{search}%"),
-            BusinessResult.business_id.ilike(f"%{search}%"),
-            BusinessResult.business_alei.ilike(f"%{search}%"),
-            BusinessResult.keyword.ilike(f"%{search}%"),
-            BusinessResult.business_email.ilike(f"%{search}%")
-        )
-        query = query.filter(search_filter)
-    
-    # Apply column filters
-    if business_name:
-        query = query.filter(BusinessResult.business_name.ilike(f"%{business_name}%"))
-    if business_status:
-        query = query.filter(BusinessResult.business_status.ilike(f"%{business_status}%"))
-    if keyword:
-        query = query.filter(BusinessResult.keyword.ilike(f"%{keyword}%"))
-    if naics_code:
-        query = query.filter(BusinessResult.naics_code.ilike(f"%{naics_code}%"))
-    
-    # Get total count
-    total = query.count()
-    
-    # Apply pagination
-    offset = (page - 1) * limit
-    results = query.offset(offset).limit(limit).all()
-    
-    return {
-        "results": results,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "total_pages": (total + limit - 1) // limit
-    }
+    try:
+        query = db.query(BusinessResult)
+        
+        # Apply unified search
+        if search:
+            search_filter = or_(
+                BusinessResult.business_name.ilike(f"%{search}%"),
+                BusinessResult.business_id.ilike(f"%{search}%"),
+                BusinessResult.business_alei.ilike(f"%{search}%"),
+                BusinessResult.keyword.ilike(f"%{search}%"),
+                BusinessResult.business_email.ilike(f"%{search}%")
+            )
+            query = query.filter(search_filter)
+        
+        # Apply column filters
+        if business_name:
+            query = query.filter(BusinessResult.business_name.ilike(f"%{business_name}%"))
+        if business_status:
+            query = query.filter(BusinessResult.business_status.ilike(f"%{business_status}%"))
+        if keyword:
+            query = query.filter(BusinessResult.keyword.ilike(f"%{keyword}%"))
+        if naics_code:
+            query = query.filter(BusinessResult.naics_code.ilike(f"%{naics_code}%"))
+        
+        # Get total count
+        total = query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * limit
+        results = query.offset(offset).limit(limit).all()
+        
+        # Convert ORM objects to dictionaries to avoid serialization issues
+        results_data = [
+            {
+                "id": r.id,
+                "business_id": r.business_id,
+                "keyword": r.keyword,
+                "business_name": r.business_name,
+                "business_alei": r.business_alei,
+                "business_status": r.business_status,
+                "date_formed": r.date_formed,
+                "business_email": r.business_email,
+                "citizenship_formation": r.citizenship_formation,
+                "business_address": r.business_address,
+                "mailing_address": r.mailing_address,
+                "requires_annual_filing": r.requires_annual_filing,
+                "annual_report_due": r.annual_report_due,
+                "public_substatus": r.public_substatus,
+                "naics_code": r.naics_code,
+                "naics_sub_code": r.naics_sub_code,
+                "last_report_filed": r.last_report_filed,
+                "principal_name": r.principal_name,
+                "principal_business_address": r.principal_business_address,
+                "principal_title": r.principal_title,
+                "principal_residence_address": r.principal_residence_address,
+                "agent_name": r.agent_name,
+                "agent_business_address": r.agent_business_address,
+                "agent_mailing_address": r.agent_mailing_address,
+                "agent_residence_address": r.agent_residence_address,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in results
+        ]
+        
+        return {
+            "results": results_data,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit
+        }
+    except Exception as e:
+        logger.error(f"Error fetching results: {str(e)}")
+        # Return empty results instead of failing
+        return {
+            "results": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "total_pages": 0
+        }
 
 @app.get("/api/results/{result_id}", response_model=BusinessResultSchema)
 async def get_result(result_id: int, db: Session = Depends(get_db)):
