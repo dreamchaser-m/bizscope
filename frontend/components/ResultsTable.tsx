@@ -5,10 +5,10 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
 import { RefreshCw, Download } from 'lucide-react';
-import { resultsApi, statusApi } from '../lib/api';
-import { useStore } from '../lib/store';
+import { resultsApi, statusApi } from '@/lib/api';
+import { useStore } from '@/lib/store';
 import BusinessModal from './BusinessModal';
-import type { BusinessResult } from '../lib/store';
+import type { BusinessResult } from '@/lib/store';
 import {
   useReactTable,
   getCoreRowModel,
