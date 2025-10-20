@@ -5,9 +5,9 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
 import { Trash2, Edit2, Plus, Save } from 'lucide-react';
-import { keywordsApi } from '@/lib/api';
-import { useStore } from '@/lib/store';
-import type { Keyword } from '@/lib/store';
+import { keywordsApi } from '../lib/api';
+import { useStore } from '../lib/store';
+import type { Keyword } from '../lib/store';
 
 export default function KeywordPanel() {
   const { keywords, setKeywords, status } = useStore();
