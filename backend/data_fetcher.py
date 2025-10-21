@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.orm import Session
 from models import BusinessResult
 from typing import Optional
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,26 @@ def build_address(street: Optional[str], city: Optional[str],
     return ", ".join(parts) if parts else None
 
 
+def date_n_days_ago(n: int) -> str:
+    """
+    Returns a string representing the date 'n' days ago in 'YYYY-MM-DD' format.
+    
+    Args:
+        n (int): Number of days to subtract from today.
+    
+    Returns:
+        str: Date string in 'YYYY-MM-DD'.
+    """
+    target_date = datetime.today() - timedelta(days=n)
+    return target_date.strftime('%Y-%m-%d')
+
+
 async def fetch_and_save_business_data(db: Session, keyword: str):
     try:
         cleaned_keyword = clean_keyword(keyword)
-        business_url = f"https://data.ct.gov/resource/n7gp-d28j.json?$where=(lower(replace(replace(replace(replace(replace(name, ' ', ''), '%26', ''), '-', ''), '.', ''), ',', '')) like '%25{cleaned_keyword}%25')&$order=name asc"
+        business_url = f"https://data.ct.gov/resource/n7gp-d28j.json?$where=(lower(replace(replace(replace(replace(replace(name, ' ', ''), '%26', ''), '-', ''), '.', ''), ',', '')) like '%25{cleaned_keyword}%25'  AND date_registration >= '{date_n_days_ago(7)}')&$order=name asc"
+        
+        businesses = []
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             logger.info(f"Fetching businesses for keyword: {keyword}")
@@ -50,6 +67,8 @@ async def fetch_and_save_business_data(db: Session, keyword: str):
                 business_id = business.get('id')
                 if not business_id:
                     continue
+                
+                logger.info(f"selected business_id is {business_id}")
 
                 existing = db.query(BusinessResult).filter(
                     BusinessResult.business_id == business_id).first()
@@ -109,11 +128,8 @@ async def fetch_and_save_business_data(db: Session, keyword: str):
             logger.info(
                 f"Successfully saved business data for keyword: {keyword}")
 
-        # Fetch principals, agents, and filings
-        businesses = db.query(BusinessResult).filter(
-            BusinessResult.keyword.contains(keyword)).all()
         for business in businesses:
-            business_id = business.business_id
+            business_id = business.get('id')
             async with httpx.AsyncClient(timeout=10.0) as client:
                 try:
                     principal_url = f"https://data.ct.gov/resource/ka36-64k6.json?$where=(business_id='{business_id}')"
@@ -121,7 +137,7 @@ async def fetch_and_save_business_data(db: Session, keyword: str):
                     principal_response.raise_for_status()
                     principals = principal_response.json()
 
-                    if principals:
+                    if principals and len(principals) > 0:
                         principal = principals[0]
                         business.principal_name = principal.get('name__c')
                         business.principal_title = principal.get('designation')
@@ -144,7 +160,7 @@ async def fetch_and_save_business_data(db: Session, keyword: str):
                     agent_response.raise_for_status()
                     agents = agent_response.json()
 
-                    if agents:
+                    if agents and len(agents) > 0:
                         agent = agents[0]
                         business.agent_name = agent.get('name__c')
                         business.agent_business_address = agent.get(
@@ -168,7 +184,7 @@ async def fetch_and_save_business_data(db: Session, keyword: str):
                     filing_response.raise_for_status()
                     filings = filing_response.json()
 
-                    if filings:
+                    if filings and len(filings) > 0:
                         filing_date = filings[0].get('filing_date', '')
                         business.last_report_filed = filing_date[:
                                                                  10] if filing_date else None
